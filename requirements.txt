@@ -1,0 +1,15 @@
+Flask==2.3.3
+earthengine-api==0.1.392
+google-auth==2.22.0
+google-auth-oauthlib==1.0.0
+pandas==2.1.4
+prophet==1.1.5
+numpy==1.26.0
+plotly==5.17.0
+convertdate==2.4.0
+holidays==0.28
+lunarcalendar==0.0.9
+stanio==0.3.0
+cmdstanpy==1.2.0
+scipy==1.11.3
+gunicorn==21.2.0

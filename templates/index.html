@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anthoscope</title>
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
+    <script src="https://unpkg.com/@mapbox/mapbox-gl-draw@1.4.3/dist/mapbox-gl-draw.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/@mapbox/mapbox-gl-draw@1.4.3/dist/mapbox-gl-draw.css" type="text/css">
+    <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Add Chart.js date adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+        .calculation-box {
+            position: absolute;
+            bottom: 40px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            font-family: Arial, sans-serif;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            max-width: 320px;
+            z-index: 1;
+        }
+        .chart-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            width: 600px;
+            max-height: 450px;
+            display: none;
+            z-index: 1;
+        }
+        .chart-container.show {
+            display: block;
+        }
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .close-chart {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: auto;
+        }
+        .close-chart:hover {
+            color: #000;
+        }
+        .legend-container {
+            position: absolute;
+            top: 20px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            font-family: Arial, sans-serif;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            display: none;
+            z-index: 1;
+        }
+        .legend-container.show {
+            display: block;
+        }
+        .legend-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+        .legend-color {
+            width: 30px;
+            height: 15px;
+            margin-right: 8px;
+            border: 1px solid #ccc;
+        }
+        .ndvi-info {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+        }
+        .loading {
+            color: #0066cc;
+            font-style: italic;
+        }
+        .error {
+            color: #cc0000;
+        }
+        .success {
+            color: #006600;
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #0052a3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .date-inputs {
+            margin-top: 10px;
+        }
+        .date-inputs label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .date-inputs input {
+            width: 100%;
+            padding: 6px;
+            margin-bottom: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .layer-toggle {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+        }
+        .layer-toggle label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .layer-toggle input[type="checkbox"] {
+            margin-right: 8px;
+            width: auto;
+        }
+        .draw-controls {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+        }
+        .draw-controls button {
+            margin: 2px;
+            width: calc(50% - 4px);
+        }
+        .draw-controls .btn-group {
+            display: flex;
+            gap: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="legend-container" id="legend">
+        <div class="legend-title">NDVI Values</div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #1a9850;"></div>
+            <span>0.8 - 1.0: Dense vegetation</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #66bd63;"></div>
+            <span>0.6 - 0.8: Moderate vegetation</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #a6d96a;"></div>
+            <span>0.4 - 0.6: Sparse vegetation</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #d9ef8b;"></div>
+            <span>0.2 - 0.4: Very sparse vegetation</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #fee08b;"></div>
+            <span>0.1 - 0.2: Almost no vegetation</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #fdae61;"></div>
+            <span>0.0 - 0.1: No vegetation</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #f46d43;"></div>
+            <span>-0.1 - 0.0: Water/Snow</span>
+        </div>
+    </div>
+    
+    <div class="calculation-box">
+        <p><strong>Draw a polygon on the map</strong></p>
+        <div id="calculated-area"></div>
+        
+        <div class="draw-controls">
+            <div class="btn-group">
+                <button id="draw-polygon" style="background-color: #28a745;">Draw Polygon</button>
+                <button id="remove-polygon" style="background-color: #dc3545;">Remove Polygon</button>
+            </div>
+        </div>
+        
+        <div class="date-inputs">
+            <label for="target-date">Date of Interest:</label>
+            <input type="date" id="target-date">
+        </div>
+        <div class="layer-toggle">
+            <label>
+                <input type="checkbox" id="ndvi-layer-toggle">
+                Show NDVI Layer
+            </label>
+        </div>
+        <button id="calculate-ndvi" disabled>Calculate NDVI</button>
+        <button id="show-history" disabled>Show Historical NDVI</button>
+        <button id="forecast-ndvi" disabled>Forecast Future NDVI</button>
+        <div id="ndvi-result" class="ndvi-info"></div>
+    </div>
+    
+    <div class="chart-container" id="chart-container">
+        <div class="chart-header">
+            <h3 style="margin: 0;">NDVI History (Past Year)</h3>
+            <button class="close-chart" id="close-chart">&times;</button>
+        </div>
+        <canvas id="ndvi-chart" width="560" height="300"></canvas>
+    </div>
+    
+    <script>
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: 'https://tiles.openfreemap.org/styles/bright',
+            center: [22.965299092183916, 40.63759089777075],
+            zoom: 9
+        });
+
+        const draw = new MapboxDraw({
+            displayControlsDefault: false,
+            controls: {
+                polygon: false,
+                trash: false
+            },
+            styles: [
+                {
+                    'id': 'gl-draw-polygon-fill',
+                    'type': 'fill',
+                    'filter': ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
+                    'paint': {
+                        'fill-color': '#FF0000',
+                        'fill-opacity': 0.5
+                    }
+                },
+                {
+                    'id': 'gl-draw-polygon-stroke-active',
+                    'type': 'line',
+                    'filter': ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
+                    'paint': {
+                        'line-color': '#000000',
+                        'line-width': 3
+                    }
+                }
+            ]
+        });
+
+        let currentPolygon = null;
+        let ndviChart = null;
+        let ndviLayerLoaded = false;
+
+        map.on('load', function() {
+            console.log('Map loaded successfully');
+            
+            // Check if backend is available
+            fetch('/health')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Backend health check:', data);
+                    if (!data.ee_initialized) {
+                        console.warn('⚠️ Earth Engine not initialized:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ Cannot connect to backend:', error);
+                });
+            
+            map.addControl(draw, 'top-left');
+            map.addControl(new maplibregl.NavigationControl(), 'top-right');
+            map.addControl(new maplibregl.FullscreenControl(), 'top-right');
+            map.addControl(new maplibregl.GeolocateControl({
+                positionOptions: {
+                    enableHighAccuracy: true
+                },
+                trackUserLocation: true
+            }), 'top-right');
+
+            const today = new Date();
+            document.getElementById('target-date').valueAsDate = today;
+
+            // Custom draw controls
+            document.getElementById('draw-polygon').addEventListener('click', function() {
+                draw.changeMode('draw_polygon');
+                document.getElementById('ndvi-result').innerHTML = '<p class="loading">Click on the map to start drawing a polygon...</p>';
+            });
+
+            document.getElementById('remove-polygon').addEventListener('click', function() {
+                const data = draw.getAll();
+                if (data.features.length === 0) {
+                    document.getElementById('ndvi-result').innerHTML = '<p class="error">No polygon to remove!</p>';
+                    return;
+                }
+                
+                data.features.forEach(feature => {
+                    draw.delete(feature.id);
+                });
+                
+                currentPolygon = null;
+                document.getElementById('calculated-area').innerHTML = '';
+                document.getElementById('calculate-ndvi').disabled = true;
+                document.getElementById('show-history').disabled = true;
+                document.getElementById('forecast-ndvi').disabled = true;
+                document.getElementById('ndvi-result').innerHTML = '<p class="success">Polygon removed successfully!</p>';
+                
+                setTimeout(() => {
+                    document.getElementById('ndvi-result').innerHTML = '';
+                }, 3000);
+            });
+
+            map.on('draw.create', updateArea);
+            map.on('draw.delete', updateArea);
+            map.on('draw.update', updateArea);
+
+            function updateArea(e) {
+                const data = draw.getAll();
+                const answer = document.getElementById('calculated-area');
+                const ndviButton = document.getElementById('calculate-ndvi');
+                const historyButton = document.getElementById('show-history');
+                const forecastButton = document.getElementById('forecast-ndvi');
+                const ndviResult = document.getElementById('ndvi-result');
+                
+                if (data.features.length > 0) {
+                    currentPolygon = data.features[0];
+                    const area = turf.area(data);
+                    const rounded_area = (Math.round(area * 100) / 100000000).toFixed(3);
+                    answer.innerHTML = `<p>Area: <strong>${rounded_area}</strong> km²</p>`;
+                    ndviButton.disabled = false;
+                    historyButton.disabled = false;
+                    forecastButton.disabled = false;
+                    ndviResult.innerHTML = '<p class="success">Polygon drawn successfully!</p>';
+                    
+                    setTimeout(() => {
+                        if (ndviResult.innerHTML.includes('successfully')) {
+                            ndviResult.innerHTML = '';
+                        }
+                    }, 3000);
+                } else {
+                    currentPolygon = null;
+                    answer.innerHTML = '';
+                    ndviButton.disabled = true;
+                    historyButton.disabled = true;
+                    forecastButton.disabled = true;
+                }
+            }
+
+            // NDVI Layer Toggle
+            document.getElementById('ndvi-layer-toggle').addEventListener('change', async function(e) {
+                const legend = document.getElementById('legend');
+                
+                if (e.target.checked) {
+                    await loadNDVILayer();
+                    legend.classList.add('show');
+                } else {
+                    removeNDVILayer();
+                    legend.classList.remove('show');
+                }
+            });
+
+            async function loadNDVILayer() {
+                const targetDate = document.getElementById('target-date').value;
+                
+                if (!targetDate) {
+                    alert('Please select a date first');
+                    document.getElementById('ndvi-layer-toggle').checked = false;
+                    return;
+                }
+                
+                console.log('🌍 Loading NDVI layer for date:', targetDate);
+                
+                try {
+                    const response = await fetch('/get-ndvi-tile-url', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            target_date: targetDate
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        const text = await response.text();
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const contentType = response.headers.get("content-type");
+                    if (!contentType || !contentType.includes("application/json")) {
+                        const text = await response.text();
+                        throw new Error("Server returned HTML instead of JSON. Check console for details.");
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        alert(`Error: ${data.error}`);
+                        document.getElementById('ndvi-layer-toggle').checked = false;
+                        return;
+                    }
+                    
+                    if (map.getLayer('ndvi-layer')) {
+                        map.removeLayer('ndvi-layer');
+                    }
+                    if (map.getSource('ndvi-tiles')) {
+                        map.removeSource('ndvi-tiles');
+                    }
+                    
+                    map.addSource('ndvi-tiles', {
+                        'type': 'raster',
+                        'tiles': [data.tile_url],
+                        'tileSize': 256
+                    });
+                    
+                    map.addLayer({
+                        'id': 'ndvi-layer',
+                        'type': 'raster',
+                        'source': 'ndvi-tiles',
+                        'paint': {
+                            'raster-opacity': 0.7
+                        }
+                    });
+                    
+                    ndviLayerLoaded = true;
+                    
+                } catch (error) {
+                    alert(`Error loading NDVI layer: ${error.message}`);
+                    document.getElementById('ndvi-layer-toggle').checked = false;
+                }
+            }
+
+            function removeNDVILayer() {
+                if (map.getLayer('ndvi-layer')) {
+                    map.removeLayer('ndvi-layer');
+                }
+                if (map.getSource('ndvi-tiles')) {
+                    map.removeSource('ndvi-tiles');
+                }
+                ndviLayerLoaded = false;
+            }
+
+            // Calculate NDVI Button
+            document.getElementById('calculate-ndvi').addEventListener('click', async function() {
+                if (!currentPolygon) return;
+                
+                const ndviResult = document.getElementById('ndvi-result');
+                const button = this;
+                const targetDate = document.getElementById('target-date').value;
+                
+                if (!targetDate) {
+                    ndviResult.innerHTML = '<p class="error">Please select a date</p>';
+                    return;
+                }
+                
+                button.disabled = true;
+                ndviResult.innerHTML = '<p class="loading">Finding closest MODIS data...</p>';
+                
+                try {
+                    const response = await fetch('/calculate-ndvi', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            geometry: currentPolygon.geometry,
+                            target_date: targetDate
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        ndviResult.innerHTML = `<p class="error">Error: ${data.error}</p>`;
+                    } else {
+                        const ndviValue = data.ndvi.toFixed(4);
+                        const date = data.date;
+                        const daysDiff = data.days_difference;
+                        ndviResult.innerHTML = `
+                            <p class="success"><strong>NDVI: ${ndviValue}</strong></p>
+                            <p style="font-size: 0.9em;">Image Date: ${date}</p>
+                            <p style="font-size: 0.85em; color: #666;">
+                                ${daysDiff === 0 ? 'Exact match' : `${Math.abs(daysDiff)} day${Math.abs(daysDiff) > 1 ? 's' : ''} ${daysDiff > 0 ? 'after' : 'before'} target date`}
+                            </p>
+                            <p style="font-size: 0.85em; color: #666;">
+                                MODIS Terra 16-Day NDVI<br>
+                                250m resolution
+                            </p>
+                        `;
+                    }
+                } catch (error) {
+                    ndviResult.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+                } finally {
+                    button.disabled = false;
+                }
+            });
+
+            // Show Historical NDVI Button
+            document.getElementById('show-history').addEventListener('click', async function() {
+                if (!currentPolygon) return;
+                
+                const button = this;
+                const targetDate = document.getElementById('target-date').value;
+                
+                if (!targetDate) {
+                    alert('Please select a date');
+                    return;
+                }
+                
+                button.disabled = true;
+                button.textContent = 'Loading...';
+                
+                try {
+                    const response = await fetch('/get-ndvi-history', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            geometry: currentPolygon.geometry,
+                            target_date: targetDate
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        alert(`Error: ${data.error}`);
+                    } else {
+                        displayChart(data.time_series, data.blooms);
+                    }
+                } catch (error) {
+                    alert(`Error: ${error.message}`);
+                } finally {
+                    button.disabled = false;
+                    button.textContent = 'Show Historical NDVI';
+                }
+            });
+
+            // Forecast NDVI Button
+            document.getElementById('forecast-ndvi').addEventListener('click', async function() {
+                if (!currentPolygon) return;
+                
+                const button = this;
+                const targetDate = document.getElementById('target-date').value;
+                
+                if (!targetDate) {
+                    alert('Please select a date');
+                    return;
+                }
+                
+                button.disabled = true;
+                button.textContent = 'Generating Forecast...';
+                
+                try {
+                    const response = await fetch('/forecast-ndvi', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            geometry: currentPolygon.geometry,
+                            target_date: targetDate,
+                            periods: 12
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        alert(`Error: ${data.error}`);
+                    } else {
+                        displayForecastChart(data.historical, data.forecast, data.model_metrics);
+                    }
+                } catch (error) {
+                    alert(`Error: ${error.message}`);
+                    console.error('Forecast error:', error);
+                } finally {
+                    button.disabled = false;
+                    button.textContent = 'Forecast Future NDVI';
+                }
+            });
+
+            // Close Chart Button
+            document.getElementById('close-chart').addEventListener('click', function() {
+                document.getElementById('chart-container').classList.remove('show');
+            });
+
+            function displayChart(timeSeries, blooms) {
+                const chartContainer = document.getElementById('chart-container');
+                chartContainer.classList.add('show');
+                
+                const ctx = document.getElementById('ndvi-chart').getContext('2d');
+                
+                if (ndviChart) {
+                    ndviChart.destroy();
+                }
+                
+                // Use simple labels instead of time scale to avoid date adapter issues
+                const labels = timeSeries.map(d => d.date);
+                const ndviValues = timeSeries.map(d => d.ndvi);
+                
+                const bloomDates = blooms.map(b => b.date);
+                const bloomValues = blooms.map(b => b.ndvi);
+                
+                ndviChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'NDVI',
+                                data: ndviValues,
+                                borderColor: '#2e7d32',
+                                backgroundColor: 'rgba(46, 125, 50, 0.1)',
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3,
+                                pointHoverRadius: 5
+                            },
+                            {
+                                label: 'Blooming Events',
+                                data: labels.map(date => {
+                                    const idx = bloomDates.indexOf(date);
+                                    return idx !== -1 ? bloomValues[idx] : null;
+                                }),
+                                borderColor: '#ff1744',
+                                backgroundColor: '#ff1744',
+                                pointRadius: 8,
+                                pointStyle: 'star',
+                                showLine: false,
+                                pointHoverRadius: 10
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y.toFixed(4);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'Date'
+                                },
+                                ticks: {
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                }
+                            },
+                            y: {
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'NDVI Value'
+                                },
+                                min: 0,
+                                max: 1
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    }
+                });
+            }
+
+            function displayForecastChart(historical, forecast, metrics) {
+                const chartContainer = document.getElementById('chart-container');
+                chartContainer.classList.add('show');
+                
+                const ctx = document.getElementById('ndvi-chart').getContext('2d');
+                
+                if (ndviChart) {
+                    ndviChart.destroy();
+                }
+                
+                // Use simple labels for both historical and forecast data
+                const historicalLabels = historical.map(d => d.date);
+                const forecastLabels = forecast.map(d => d.date);
+                const allLabels = [...historicalLabels, ...forecastLabels];
+                
+                const historicalData = historical.map(d => d.ndvi);
+                const forecastData = forecast.map(d => d.ndvi);
+                
+                // Create a combined dataset for the line
+                const combinedData = [
+                    ...historical.map(d => ({x: d.date, y: d.ndvi})),
+                    ...forecast.map(d => ({x: d.date, y: d.ndvi}))
+                ];
+                
+                ndviChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: allLabels,
+                        datasets: [
+                            {
+                                label: 'Historical NDVI',
+                                data: historicalData,
+                                borderColor: '#2e7d32',
+                                backgroundColor: 'rgba(46, 125, 50, 0.1)',
+                                borderWidth: 2,
+                                fill: false,
+                                pointRadius: 3,
+                                pointHoverRadius: 5,
+                                tension: 0.4
+                            },
+                            {
+                                label: 'Forecast NDVI',
+                                data: [...Array(historicalData.length).fill(null), ...forecastData],
+                                borderColor: '#ff9800',
+                                backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                fill: false,
+                                pointRadius: 2,
+                                pointHoverRadius: 4,
+                                tension: 0.4
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y.toFixed(4);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'Date'
+                                },
+                                ticks: {
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                }
+                            },
+                            y: {
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'NDVI Value'
+                                },
+                                min: 0,
+                                max: 1,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value.toFixed(2);
+                                    }
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    }
+                });
+                
+                // Update chart header with forecast info
+                const chartHeader = document.querySelector('.chart-header h3');
+                chartHeader.textContent = `NDVI Forecast (${metrics.forecast_points} future points) - ${metrics.model}`;
+            }
+        });
+    </script>
+</body>
+</html>
